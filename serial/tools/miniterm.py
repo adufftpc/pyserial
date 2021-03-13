@@ -13,6 +13,7 @@ import codecs
 import os
 import sys
 import threading
+import logging
 
 import serial
 from serial.tools.list_ports import comports
@@ -358,6 +359,7 @@ TRANSFORMATIONS = {
     'debug': DebugIO,
 }
 
+EOL_CHARS = ('\r\n', '\n', '\r')
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 def ask_for_port():
@@ -391,7 +393,7 @@ class Miniterm(object):
     Handle special keys from the console to show menu etc.
     """
 
-    def __init__(self, serial_instance, echo=False, eol='crlf', filters=()):
+    def __init__(self, serial_instance, echo=False, eol='crlf', filters=(), log_rx=None, log_tx=None):
         self.console = Console()
         self.serial = serial_instance
         self.echo = echo
@@ -408,6 +410,10 @@ class Miniterm(object):
         self.receiver_thread = None
         self.rx_decoder = None
         self.tx_decoder = None
+        self.log_rx = log_rx
+        self.log_tx = log_tx
+        self.buf_rx = ''
+        self.buf_tx = ''
 
     def _start_reader(self):
         """Start reader thread"""
@@ -505,6 +511,16 @@ class Miniterm(object):
                         for transformation in self.rx_transformations:
                             text = transformation.rx(text)
                         self.console.write(text)
+
+                    if self.log_rx is not None:
+                        is_cr = False
+                        self.buf_rx += data.decode("utf-8", errors='backslashreplace')
+                        if self.buf_rx in EOL_CHARS:
+                            self.buf_rx = ''
+                        elif self.buf_rx.endswith(EOL_CHARS):
+                            self.log_rx.info('[Rx] {}'.format(self.buf_rx.strip()))
+                            self.buf_rx = ''
+
         except serial.SerialException:
             self.alive = False
             self.console.cancel()
@@ -544,6 +560,15 @@ class Miniterm(object):
                         for transformation in self.tx_transformations:
                             echo_text = transformation.echo(echo_text)
                         self.console.write(echo_text)
+
+                    if self.log_tx is not None:
+                        self.buf_tx += text
+                        if self.buf_tx in EOL_CHARS:
+                            self.buf_tx = ''
+                        if self.buf_tx.endswith(EOL_CHARS):
+                            self.log_tx.info('[Tx] {}'.format(self.buf_rx.strip()))
+                            self.buf_tx = ''
+
         except:
             self.alive = False
             raise
@@ -942,6 +967,26 @@ def main(default_port=None, default_baudrate=9600, default_rts=None, default_dtr
         help='show Python traceback on error',
         default=False)
 
+    group = parser.add_argument_group('logging')
+
+    group.add_argument(
+        '--log',
+        type=str,
+        help='Record bidirectional log',
+        default=None)
+
+    group.add_argument(
+        '--log-rx',
+        type=str,
+        help='Record input log',
+        default=None)
+
+    group.add_argument(
+        '--log-tx',
+        type=str,
+        help='Record output log',
+        default=None)
+
     args = parser.parse_args()
 
     if args.menu_char == args.exit_char:
@@ -1007,11 +1052,35 @@ def main(default_port=None, default_baudrate=9600, default_rts=None, default_dtr
         else:
             break
 
+    log_rx = log_tx = None
+    log_format = logging.Formatter('%(asctime)s %(message)s')
+
+    def create_log(filepath: str, formatter: logging.Formatter, log_name: str = '') -> logging.Logger:
+        logger = logging.getLogger(log_name)
+        logger.setLevel(logging.INFO)
+
+        fh = logging.FileHandler(filepath)
+        fh.setLevel(logging.INFO)
+        fh.setFormatter(formatter)
+
+        logger.addHandler(fh)
+
+        return logger
+
+    if args.log is not None:
+        log_rx = log_tx = create_log(args.log, log_format, 'trx')
+    if args.log_rx is not None:
+        log_rx = create_log(args.log_rx, log_format, 'rx')
+    if args.log_tx is not None:
+        log_tx = create_log(args.log_rx, log_format, 'tx')
+
     miniterm = Miniterm(
         serial_instance,
         echo=args.echo,
         eol=args.eol.lower(),
-        filters=filters)
+        filters=filters,
+        log_rx=log_rx,
+        log_tx=log_tx)
     miniterm.exit_character = unichr(args.exit_char)
     miniterm.menu_character = unichr(args.menu_char)
     miniterm.raw = args.raw
