@@ -14,6 +14,7 @@ import os
 import sys
 import threading
 import logging
+from logging.handlers import RotatingFileHandler
 
 import serial
 from serial.tools.list_ports import comports
@@ -972,20 +973,32 @@ def main(default_port=None, default_baudrate=9600, default_rts=None, default_dtr
     group.add_argument(
         '--log',
         type=str,
-        help='Record bidirectional log',
+        help='Bidirectional log path',
         default=None)
 
     group.add_argument(
         '--log-rx',
         type=str,
-        help='Record input log',
+        help='Input log path',
         default=None)
 
     group.add_argument(
         '--log-tx',
         type=str,
-        help='Record output log',
-        default=None)
+        help='Output log path',
+        default=False)
+
+    group.add_argument(
+        '--log-rotate-mb',
+        type=float,
+        help='Rotation log size in MB',
+        default=0)
+
+    group.add_argument(
+        '--log-omit-timestamp',
+        action='store_true',
+        help='Do not add a timestamp to log',
+        default=False)
 
     args = parser.parse_args()
 
@@ -1053,13 +1066,20 @@ def main(default_port=None, default_baudrate=9600, default_rts=None, default_dtr
             break
 
     log_rx = log_tx = None
-    log_format = logging.Formatter('%(asctime)s %(message)s')
+
+    log_format = ''
+    if args.log_omit_timestamp:
+        log_format += '%(message)s'
+    else:
+        log_format += '%(asctime)s %(message)s'
+
+    log_format = logging.Formatter(log_format)
 
     def create_log(filepath: str, formatter: logging.Formatter, log_name: str = '') -> logging.Logger:
         logger = logging.getLogger(log_name)
         logger.setLevel(logging.INFO)
 
-        fh = logging.FileHandler(filepath)
+        fh = RotatingFileHandler(filepath, maxBytes=int(args.log_rotate_mb * 1024 * 1024))
         fh.setLevel(logging.INFO)
         fh.setFormatter(formatter)
 
