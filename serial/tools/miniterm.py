@@ -986,13 +986,13 @@ def main(default_port=None, default_baudrate=9600, default_rts=None, default_dtr
         '--log-tx',
         type=str,
         help='Output log path',
-        default=False)
+        default=None)
 
     group.add_argument(
         '--log-rotate-mb',
         type=float,
         help='Rotation log size in MB',
-        default=0)
+        default=0.)
 
     group.add_argument(
         '--log-omit-timestamp',
